@@ -1,0 +1,9 @@
+- id: deepsweep
+  name: DeepSweep Security Validation
+  description: Validate AI coding assistant configurations
+  entry: deepsweep validate
+  language: python
+  types: [file]
+  files: \.(cursorrules|windsurfrules|rules)$|mcp\.json$|copilot-instructions\.md$|claude_desktop_config\.json$
+  pass_filenames: false
+  always_run: true
