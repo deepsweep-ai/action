@@ -1,0 +1,45 @@
+# Advanced workflow with matrix, caching, and conditional steps
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly Monday 6am
+
+jobs:
+  validate:
+    name: DeepSweep Validation
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      security-events: write  # Required for SARIF upload
+      pull-requests: write    # Required for PR comments
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run DeepSweep
+        id: deepsweep
+        uses: deepsweep-ai/action@v1
+        with:
+          path: '.'
+          fail-on: 'high'
+          upload-sarif: 'true'
+          comment-on-pr: 'true'
+
+      - name: Check critical findings
+        if: steps.deepsweep.outputs.critical-count > 0
+        run: |
+          echo "[FAIL] Found ${{ steps.deepsweep.outputs.critical-count }} critical item(s)"
+          echo "Review the Security tab for details"
+
+      - name: Badge update
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "Score: ${{ steps.deepsweep.outputs.score }}"
+          echo "Grade: ${{ steps.deepsweep.outputs.grade }}"
+          # Could update a badge service here

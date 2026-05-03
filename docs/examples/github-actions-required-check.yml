@@ -1,0 +1,28 @@
+# Branch protection with DeepSweep as required check
+name: Security Gate
+
+on:
+  pull_request:
+    branches: [main, release/*]
+
+jobs:
+  security-gate:
+    name: Security Validation (Required)
+    runs-on: ubuntu-latest
+
+    # This job must pass for PR to be mergeable
+    # Configure in: Settings > Branches > Branch protection rules
+
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: deepsweep-ai/action@v1
+        with:
+          fail-on: 'high'
+          upload-sarif: 'true'
+          comment-on-pr: 'true'

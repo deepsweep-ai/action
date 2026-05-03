@@ -1,0 +1,31 @@
+# Monorepo with multiple paths to validate
+name: Security
+
+on:
+  push:
+    paths:
+      - 'services/**'
+      - 'packages/**'
+      - '.cursor*'
+      - 'mcp.json'
+
+jobs:
+  validate:
+    name: Validate ${{ matrix.path }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        path:
+          - 'services/api'
+          - 'services/web'
+          - 'packages/shared'
+          - '.'  # Root level configs
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: deepsweep-ai/action@v1
+        with:
+          path: ${{ matrix.path }}
+          fail-on: 'high'

@@ -1,0 +1,20 @@
+# Basic DeepSweep validation on every push and PR
+name: Security
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    name: DeepSweep Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run DeepSweep
+        uses: deepsweep-ai/action@v1
