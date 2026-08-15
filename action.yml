@@ -1,209 +1,339 @@
-name: 'DeepSweep Security'
-description: 'Validate AI coding assistant configurations for security issues'
-author: 'DeepSweep'
+name: 'DeepSweep AI Code Security'
+description: |
+  Validate your codebase for AI-generated code security risks, typosquatting, and supply chain threats.
+
+  Permissions required for PR comments:
+    pull-requests: write
+  Permissions required for commit status:
+    statuses: write
 branding:
   icon: 'shield'
   color: 'blue'
 
 inputs:
   path:
-    description: 'Path to validate (default: current directory)'
+    description: 'Path to scan (defaults to repository root)'
     required: false
     default: '.'
-
-  fail-on:
-    description: 'Minimum severity to fail the check (critical, high, medium, low, none)'
+  fail-below-score:
+    description: 'Fail the check if the posture score (0-100) is below this number. This is the working gate — e.g. 70.'
     required: false
-    default: 'high'
-
-  upload-sarif:
-    description: 'Upload SARIF results to GitHub Security tab'
+    default: ''
+  fail-on-grade:
+    description: 'DEPRECATED — DeepSweep scores posture 0-100 and issues no letter grade. Use fail-below-score. Setting this fails the run rather than passing a gate that cannot be evaluated.'
     required: false
-    default: 'true'
-
+    default: ''
+  api-key:
+    description: 'DeepSweep API key for authenticated access (optional)'
+    required: false
+    default: ''
   comment-on-pr:
-    description: 'Post validation results as PR comment'
+    description: 'Post a comment on pull requests with results (true/false)'
     required: false
     default: 'true'
-
-  version:
-    description: 'DeepSweep CLI version to install'
-    required: false
-    default: 'latest'
 
 outputs:
-  score:
-    description: 'Security score (0-100)'
-
   grade:
-    description: 'Security grade (A-F)'
-
-  findings-count:
-    description: 'Total number of findings'
-
-  critical-count:
-    description: 'Number of critical findings'
-
-  sarif-file:
-    description: 'Path to generated SARIF file'
+    description: 'DEPRECATED — always empty. DeepSweep issues no letter grade; use score and posture-band.'
+    value: ${{ steps.validate.outputs.grade }}
+  score:
+    description: 'Posture score, 0-100. Empty when no agent configuration was found to score.'
+    value: ${{ steps.validate.outputs.score }}
+  posture-band:
+    description: 'weak | fair | good | strong. Never render the score without this and attestation (ADR-007).'
+    value: ${{ steps.validate.outputs.posture-band }}
+  attestation:
+    description: 'Identity attestation tier the score was computed under, e.g. claimed.'
+    value: ${{ steps.validate.outputs.attestation }}
+  findings:
+    description: 'Number of findings'
+    value: ${{ steps.validate.outputs.findings }}
+  badge-markdown:
+    description: 'Markdown badge for README'
+    value: ${{ steps.validate.outputs.badge_markdown }}
 
 runs:
   using: 'composite'
   steps:
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    # ------------------------------------------------------------------
+    # PLAT-ADR-027 — the engine is BUNDLED, never installed.
+    #
+    # This action used to do:
+    #     pip install deepsweep-ai
+    #     deepsweep validate "$PATH" --format json
+    #
+    # Both are banned by name in the distribution invariant: `pip / pipx
+    # install (PyPI)` and `deepsweep validate|review|scan|verify` as a
+    # user-facing command. It also installed PyPI 1.0.2 — published
+    # 2026-01-29 — so every run scanned with a six-month-old detection set
+    # while the extension shipped 1.27.0.
+    #
+    # The sanctioned path is written into the engine itself. From
+    # engine-host.js: "Two consumers, both of which BUNDLE this artifact
+    # rather than install it: (a) the Governance Studio desktop app, which
+    # spawns it as a sidecar; (b) THE CI RUNNER, WHICH EXECUTES THE SAME
+    # FILE." The Studio already does exactly this. This action now does too,
+    # so both consumers run identical code and a review means the same thing
+    # in CI as it does on a desktop.
+    # ------------------------------------------------------------------
+    - name: Set up Node
+      uses: actions/setup-node@v4
       with:
-        python-version: '3.11'
+        node-version: '20'
 
-    - name: Install DeepSweep
+    - name: Verify the bundled engine is present
       shell: bash
       run: |
-        if [ "${{ inputs.version }}" = "latest" ]; then
-          pip install deepsweep-ai
-        else
-          pip install deepsweep-ai==${{ inputs.version }}
+        HOST="${{ github.action_path }}/engine/engine-host.js"
+        if [ ! -f "$HOST" ]; then
+          echo "::error::Bundled engine missing at engine/engine-host.js."
+          echo "::error::The release process vendors it, exactly as studio-desktop vendors sidecar/."
+          echo "::error::Failing loudly: a missing engine must never degrade into a passing review."
+          exit 1
         fi
+        echo "engine=$HOST" >> "$GITHUB_ENV"
 
-    - name: Run validation
+    - name: Run the review
       id: validate
       shell: bash
       run: |
-        # Run validation and capture output
+        set -euo pipefail
+
+        # workspaceRoot MUST be absolute — the protocol rejects relative paths.
+        TARGET="$(cd "${{ inputs.path }}" && pwd)"
+        CORRELATION_ID="gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+        REQUEST=$(NOW_ISO="$NOW_ISO" CID="$CORRELATION_ID" TARGET="$TARGET" python3 -c '
+        import json, os
+        print(json.dumps({
+            "protocolVersion": 1,
+            "command": "review",
+            "correlationId": os.environ["CID"],
+            "nowIso": os.environ["NOW_ISO"],
+            "params": {"workspaceRoot": os.environ["TARGET"]},
+        }))')
+
+        # ONE request on stdin, ONE canonical JSON response on stdout,
+        # diagnostics on stderr. stderr is never parsed and never influences
+        # pass/fail — the same contract the Studio holds.
         set +e
-        OUTPUT=$(deepsweep validate "${{ inputs.path }}" --format json 2>&1)
-        EXIT_CODE=$?
+        RESPONSE=$(printf '%s' "$REQUEST" | NO_COLOR=1 CI=1 node "$engine" 2>/tmp/deepsweep-engine.log)
+        ENGINE_EXIT=$?
         set -e
+        [ -s /tmp/deepsweep-engine.log ] && sed 's/^/[engine] /' /tmp/deepsweep-engine.log >&2 || true
 
-        # Parse JSON output
-        SCORE=$(echo "$OUTPUT" | jq -r '.score // 0')
-        GRADE=$(echo "$OUTPUT" | jq -r '.grade // "F"')
-        FINDINGS=$(echo "$OUTPUT" | jq -r '.findings_count // 0')
-        CRITICAL=$(echo "$OUTPUT" | jq -r '.findings | map(select(.severity == "critical")) | length // 0')
-
-        # Set outputs
-        echo "score=$SCORE" >> $GITHUB_OUTPUT
-        echo "grade=$GRADE" >> $GITHUB_OUTPUT
-        echo "findings-count=$FINDINGS" >> $GITHUB_OUTPUT
-        echo "critical-count=$CRITICAL" >> $GITHUB_OUTPUT
-
-        # Save full output for later steps
-        echo "$OUTPUT" > /tmp/deepsweep-results.json
-
-    - name: Generate SARIF
-      if: inputs.upload-sarif == 'true'
-      shell: bash
-      run: |
-        deepsweep validate "${{ inputs.path }}" --format sarif > deepsweep-results.sarif
-        echo "sarif-file=deepsweep-results.sarif" >> $GITHUB_OUTPUT
-
-    - name: Upload SARIF
-      if: inputs.upload-sarif == 'true'
-      uses: github/codeql-action/upload-sarif@v3
-      with:
-        sarif_file: deepsweep-results.sarif
-        category: deepsweep
-
-    - name: Comment on PR
-      if: inputs.comment-on-pr == 'true' && github.event_name == 'pull_request'
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const fs = require('fs');
-          const results = JSON.parse(fs.readFileSync('/tmp/deepsweep-results.json', 'utf8'));
-
-          let statusIcon = '[PASS]';
-          if (results.findings.some(f => f.severity === 'critical')) {
-            statusIcon = '[FAIL]';
-          } else if (results.findings.some(f => f.severity === 'high' || f.severity === 'medium')) {
-            statusIcon = '[WARN]';
-          }
-
-          let body = `## DeepSweep Security Validation\n\n`;
-          body += `${statusIcon} **Score: ${results.score}/100 (Grade: ${results.grade})**\n\n`;
-
-          if (results.findings.length === 0) {
-            body += `No issues found. Your AI assistant configurations look good!\n`;
-          } else {
-            body += `### ${results.findings.length} item(s) to review\n\n`;
-            body += `| Severity | File | Issue |\n`;
-            body += `|----------|------|-------|\n`;
-
-            for (const finding of results.findings.slice(0, 10)) {
-              const sev = finding.severity.toUpperCase();
-              body += `| ${sev} | \`${finding.file}:${finding.line}\` | ${finding.message} |\n`;
-            }
-
-            if (results.findings.length > 10) {
-              body += `\n*...and ${results.findings.length - 10} more. See the Security tab for full details.*\n`;
-            }
-          }
-
-          body += `\n---\n`;
-          body += `*Validated by [DeepSweep](https://deepsweep.ai) - You don't need to understand the code to secure it.*`;
-
-          // Find existing comment
-          const { data: comments } = await github.rest.issues.listComments({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            issue_number: context.issue.number,
-          });
-
-          const existingComment = comments.find(c =>
-            c.user.type === 'Bot' && c.body.includes('DeepSweep Security Validation')
-          );
-
-          if (existingComment) {
-            await github.rest.issues.updateComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: existingComment.id,
-              body: body,
-            });
-          } else {
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: body,
-            });
-          }
-
-    - name: Check threshold
-      shell: bash
-      run: |
-        FAIL_ON="${{ inputs.fail-on }}"
-        RESULTS=$(cat /tmp/deepsweep-results.json)
-
-        # Map severity to numeric value
-        severity_value() {
-          case $1 in
-            critical) echo 4 ;;
-            high) echo 3 ;;
-            medium) echo 2 ;;
-            low) echo 1 ;;
-            *) echo 0 ;;
-          esac
-        }
-
-        THRESHOLD=$(severity_value "$FAIL_ON")
-
-        # Check if any finding exceeds threshold
-        FAIL=0
-        for severity in critical high medium low; do
-          COUNT=$(echo "$RESULTS" | jq -r ".findings | map(select(.severity == \"$severity\")) | length")
-          SEV_VALUE=$(severity_value "$severity")
-
-          if [ "$COUNT" -gt 0 ] && [ "$SEV_VALUE" -ge "$THRESHOLD" ]; then
-            echo "[FAIL] Found $COUNT $severity item(s) to review"
-            FAIL=1
-          fi
-        done
-
-        if [ "$FAIL" -eq 1 ]; then
-          echo ""
-          echo "Validation failed. Review items above and address them."
-          echo "See the Security tab for details and remediation guidance."
+        if [ -z "$RESPONSE" ]; then
+          echo "::error::Engine returned no output (exit $ENGINE_EXIT). Failing closed."
           exit 1
         fi
 
-        echo "[PASS] No items at or above '$FAIL_ON' severity"
+        printf '%s' "$RESPONSE" > /tmp/deepsweep-response.json
+
+        # FAIL CLOSED on anything unexpected: a malformed body, a protocol or
+        # correlation mismatch, or an error envelope must never become a pass.
+        eval "$(CID="$CORRELATION_ID" python3 -c '
+        import json, os, sys
+        raw = open("/tmp/deepsweep-response.json", encoding="utf-8").read()
+        try:
+            r = json.loads(raw)
+        except Exception:
+            print("echo \"::error::Engine response was not valid JSON\"; exit 1"); sys.exit()
+        if r.get("protocolVersion") != 1:
+            print("echo \"::error::Engine protocolVersion mismatch\"; exit 1"); sys.exit()
+        if r.get("correlationId") != os.environ["CID"]:
+            print("echo \"::error::Engine correlationId mismatch\"; exit 1"); sys.exit()
+        if r.get("status") == "error":
+            msg = str(r.get("message", "engine error")).replace(chr(34), "")
+            print(f"echo \"::error::{msg}\"; exit 1"); sys.exit()
+        res = r.get("result") or {}
+        rep = res.get("report") or res
+        totals = rep.get("totals") or {}
+        # CORRECTED 2026-08-15 (second measurement). An earlier version read
+        # `report.postureScore` and concluded from its absence that the engine
+        # does not score. It does. The score is computed PER AGENT TYPE and
+        # lives at `trust[i].trustScore.postureScore` (engine review/score.js).
+        # Verified on the real sidecar: deepsweep-vscode -> 77, attestation
+        # "claimed". A workspace with no agent configured returns `trust: []`,
+        # which is genuinely unscored and must stay empty — never 0.
+        trust = res.get("trust") or []
+        ts = (trust[0].get("trustScore") or {}) if trust else {}
+        score = ts.get("postureScore")
+        attestation = ts.get("attestation") or ""
+        # Mirrors engine `postureBand`, INCLUDING the ADR-007 tier ceiling: the
+        # top band is structurally unreachable below `verified-signed`, so a
+        # claimed identity with a perfect score reads "good", never "strong".
+        band = ""
+        if score is not None:
+            band = "strong" if score >= 90 else "good" if score >= 70 else "fair" if score >= 40 else "weak"
+            if band == "strong" and attestation != "verified-signed":
+                band = "good"
+        # The engine emits no LETTER grade at all — it emits a 0-100 posture and
+        # a band. `grade` is kept only so existing workflows keep resolving; it
+        # is never invented. Use `fail-below-score` for a gate that can fire.
+        grade = rep.get("grade")
+        caps = totals.get("capabilities", 0)
+        gaps = totals.get("boundaryGaps", 0)
+        findings = len(res.get("findings") or []) or totals.get("critical", 0) + totals.get("high", 0)
+        print(f"GRADE={grade if grade is not None else ''}")
+        print(f"SCORE={score if score is not None else ''}")
+        print(f"BAND={band}")
+        print(f"ATTESTATION={attestation}")
+        print(f"FINDINGS={findings}")
+        print(f"CAPABILITIES={caps}")
+        print(f"GAPS={gaps}")
+        ')"
+
+        echo "grade=$GRADE" >> "$GITHUB_OUTPUT"
+        echo "score=$SCORE" >> "$GITHUB_OUTPUT"
+        echo "posture-band=$BAND" >> "$GITHUB_OUTPUT"
+        echo "attestation=$ATTESTATION" >> "$GITHUB_OUTPUT"
+        echo "findings=$FINDINGS" >> "$GITHUB_OUTPUT"
+
+        # The badge endpoint resolves PK=PROJECT#<project_id>. The previous
+        # version interpolated the GRADE into that slot, which can never match
+        # a project, so every badge this action emitted rendered the grey "not
+        # validated" state. Same defect as the dashboard widget, fixed 08-13.
+        echo "badge_markdown=[![DeepSweep](https://api.deepsweep.ai/v1/badge/grade/${GITHUB_REPOSITORY//\//-})](https://deepsweep.ai)" >> "$GITHUB_OUTPUT"
+
+        GRADE_LETTER=$(printf '%s' "$GRADE" | head -c1)
+        if [ "$GRADE_LETTER" = "D" ] || [ "$GRADE_LETTER" = "F" ]; then
+          echo "status=FAIL" >> "$GITHUB_OUTPUT"
+        else
+          echo "status=PASS" >> "$GITHUB_OUTPUT"
+        fi
+
+        {
+          echo
+          echo "## DeepSweep Agent Environment Review"
+          echo
+          echo "| Metric | Value |"
+          echo "|--------|-------|"
+          [ -n "$GRADE" ] && echo "| **Grade** | $GRADE |"
+          # ADR-007 normative rule: the posture number is NEVER rendered without
+          # its attestation qualifier. A bare "77/100" reads as a verified safety
+          # result, which is exactly the claim we do not make.
+          [ -n "$SCORE" ] && echo "| **Posture** | $SCORE/100 ($BAND) — identity $ATTESTATION, not verified |"
+          echo "| **Agent capabilities** | $CAPABILITIES |"
+          echo "| **Boundary gaps** | $GAPS |"
+          echo "| **Findings** | $FINDINGS |"
+          echo
+          echo "*Reviewed locally on this runner — no source left the machine.*"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        # A GATE THAT CAN ACTUALLY FIRE. The engine scores 0-100; it has no
+        # letter grade. This is the threshold to use in CI.
+        FAIL_BELOW="${{ inputs.fail-below-score }}"
+        if [ -n "$FAIL_BELOW" ]; then
+          case "$FAIL_BELOW" in
+            ''|*[!0-9]*)
+              echo "::error::fail-below-score must be a whole number 0-100, got '$FAIL_BELOW'."
+              exit 1 ;;
+          esac
+          # Same principle as below: refuse rather than pass a gate that cannot
+          # be evaluated. `trust: []` means no agent was found to score — which
+          # is not the same as scoring badly, and must not silently pass.
+          if [ -z "$SCORE" ]; then
+            echo "::error::fail-below-score was set to '$FAIL_BELOW' but no agent configuration was found to score in '${{ inputs.path }}'."
+            echo "::error::Refusing to pass a gate that cannot be evaluated. Point 'path' at a directory containing agent configuration, or remove fail-below-score."
+            exit 1
+          fi
+          if [ "$SCORE" -lt "$FAIL_BELOW" ]; then
+            echo "::error::Posture $SCORE/100 is below the required $FAIL_BELOW."
+            exit 1
+          fi
+        fi
+
+        FAIL_GRADE="${{ inputs.fail-on-grade }}"
+        if [ -n "$FAIL_GRADE" ]; then
+          # FAIL LOUDLY, NEVER SILENTLY. A gate that quietly never fires is far
+          # more dangerous than one that errors, because the repository owner
+          # believes they are protected.
+          #
+          # This engine has NO letter grade — not "not yet", but structurally:
+          # review/score.js produces a 0-100 posture and a band (weak/fair/
+          # good/strong), never A-F. So this input can never be satisfied and
+          # the error names the input that works instead.
+          if [ -z "$GRADE" ]; then
+            echo "::error::fail-on-grade was set to '$FAIL_GRADE', but DeepSweep scores posture 0-100 and does not issue letter grades."
+            echo "::error::Use 'fail-below-score: 70' instead. Refusing to pass a gate that cannot be evaluated."
+            exit 1
+          fi
+          FAIL_LETTER=$(printf '%s' "$FAIL_GRADE" | head -c1)
+          grade_to_num() {
+            case "$1" in
+              A) echo 4;; B) echo 3;; C) echo 2;; D) echo 1;; F) echo 0;; *) echo -1;;
+            esac
+          }
+          if [ "$(grade_to_num "$GRADE_LETTER")" -lt "$(grade_to_num "$FAIL_LETTER")" ]; then
+            echo "::error::Grade $GRADE is below the required $FAIL_GRADE"
+            exit 1
+          fi
+        fi
+
+    # ------------------------------------------------------------------
+    # THE VIRAL SURFACE. A PR comment is how every other contributor on a
+    # repository first sees this tool — one developer adds the action, the
+    # whole team sees the result on their next pull request. Dropping it
+    # (as the 08-15 rewrite accidentally did) left `comment-on-pr` declared
+    # and unimplemented: a silent no-op input, and the loss of the only
+    # place the product introduces itself to people who did not install it.
+    #
+    # Never fails the job: a comment we could not post must not turn a
+    # passing review red. Requires `pull-requests: write`.
+    # ------------------------------------------------------------------
+    - name: Comment on the pull request
+      if: inputs.comment-on-pr == 'true' && github.event_name == 'pull_request'
+      continue-on-error: true
+      uses: actions/github-script@v7
+      env:
+        DS_GRADE: ${{ steps.validate.outputs.grade }}
+        DS_SCORE: ${{ steps.validate.outputs.score }}
+        DS_BAND: ${{ steps.validate.outputs.posture-band }}
+        DS_ATTESTATION: ${{ steps.validate.outputs.attestation }}
+        DS_FINDINGS: ${{ steps.validate.outputs.findings }}
+      with:
+        script: |
+          const { DS_GRADE, DS_SCORE, DS_BAND, DS_ATTESTATION, DS_FINDINGS } = process.env;
+          // Only render a row we actually have a value for. The previous version
+          // always printed a Grade row, which this engine never fills — so every
+          // comment carried an empty cell where the headline number should be.
+          const rows = [];
+          if (DS_GRADE) rows.push(`| **Grade** | ${DS_GRADE} |`);
+          if (DS_SCORE) {
+            // ADR-007: the posture number is never shown without its qualifier.
+            rows.push(`| **Posture** | ${DS_SCORE}/100 (${DS_BAND}) — identity ${DS_ATTESTATION}, not verified |`);
+          } else {
+            rows.push('| **Posture** | not scored — no agent configuration found |');
+          }
+          rows.push(`| **Findings** | ${DS_FINDINGS} |`);
+          const body = [
+            '### DeepSweep — Agent Environment Review',
+            '',
+            '| Metric | Value |',
+            '|---|---|',
+            ...rows,
+            '',
+            'What your AI coding agents can reach in this repository, and where the gaps are.',
+            'Reviewed on this runner — no source left the machine.',
+          ].join('\n');
+          const marker = '<!-- deepsweep-review -->';
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner, repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          const mine = comments.find(c => c.body && c.body.includes(marker));
+          const payload = marker + '\n' + body;
+          // UPDATE, never append: a new comment on every push turns a busy PR
+          // into a wall of bot noise, which is how a useful signal gets muted.
+          if (mine) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              comment_id: mine.id, body: payload,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.issue.number, body: payload,
+            });
+          }

@@ -28,4 +28,4 @@ jobs:
       - uses: deepsweep-ai/action@v1
         with:
           path: ${{ matrix.path }}
-          fail-on: 'high'
+          fail-below-score: 70

@@ -1,141 +1,107 @@
-# DeepSweep Security Action
+# DeepSweep — Agent Environment Review for CI
 
-**Validate AI coding assistant configurations in your CI/CD pipeline.**
+**Know what your AI coding agents can reach in this repository — and where the gaps are —
+on every pull request.**
 
-You don't need to understand the code to secure it.
-
-## Features
-
-- Validates Cursor, Copilot, Claude Code, Windsurf, MCP configs
-- Uploads results to GitHub Security tab (SARIF)
-- Comments on PRs with findings
-- Configurable fail thresholds
-- Plain English remediation guidance
-
-## Usage
-
-### Basic
-
-```yaml
-name: Security
-
-on: [push, pull_request]
-
-jobs:
-  validate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: deepsweep-ai/action@v1
-```
-
-### With Options
+AI assistants read your repo, run your tools, and touch your secrets. This action reviews
+what they are actually able to do, scores it, and comments the result on the PR.
 
 ```yaml
 - uses: deepsweep-ai/action@v1
-  with:
-    path: './src'
-    fail-on: 'critical'      # Only fail on critical
-    upload-sarif: 'true'     # Upload to Security tab
-    comment-on-pr: 'true'    # Comment on PRs
 ```
 
-### Fail Thresholds
-
-| Value | Behavior |
-|-------|----------|
-| `critical` | Only fail on critical findings |
-| `high` | Fail on critical or high (default) |
-| `medium` | Fail on critical, high, or medium |
-| `low` | Fail on any finding |
-| `none` | Never fail (report only) |
-
-## Inputs
-
-| Input | Default | Description |
-|-------|---------|-------------|
-| `path` | `.` | Path to validate |
-| `fail-on` | `high` | Minimum severity to fail |
-| `upload-sarif` | `true` | Upload to Security tab |
-| `comment-on-pr` | `true` | Post PR comment |
-| `version` | `latest` | CLI version |
-
-## Outputs
-
-| Output | Description |
-|--------|-------------|
-| `score` | Security score (0-100) |
-| `grade` | Security grade (A-F) |
-| `findings-count` | Total findings |
-| `critical-count` | Critical findings |
-| `sarif-file` | Path to SARIF file |
-
-## Example Workflow with Outputs
-
-```yaml
-jobs:
-  validate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: deepsweep-ai/action@v1
-        id: deepsweep
-
-      - name: Check score
-        run: |
-          echo "Score: ${{ steps.deepsweep.outputs.score }}"
-          echo "Grade: ${{ steps.deepsweep.outputs.grade }}"
-
-          if [ "${{ steps.deepsweep.outputs.score }}" -lt 70 ]; then
-            echo "Score below 70, consider reviewing"
-          fi
-```
-
-## What Gets Validated
-
-| File | Description |
-|------|-------------|
-| `.cursorrules` | Cursor AI rules |
-| `.cursor/rules/*` | Cursor project rules |
-| `copilot-instructions.md` | GitHub Copilot |
-| `.github/copilot-instructions.md` | GitHub Copilot |
-| `claude_desktop_config.json` | Claude Code |
-| `.windsurfrules` | Windsurf |
-| `mcp.json` | MCP server configs |
-
-## Permissions
-
-For full functionality, add these permissions:
-
-```yaml
-permissions:
-  contents: read
-  security-events: write  # SARIF upload
-  pull-requests: write    # PR comments
-```
-
-## Branch Protection
-
-To require DeepSweep validation before merge:
-
-1. Go to Settings > Branches
-2. Add branch protection rule for `main`
-3. Enable "Require status checks"
-4. Search for "DeepSweep Validation"
-5. Enable "Require branches to be up to date"
-
-## Security
-
-Results are uploaded to GitHub's Security tab using SARIF format.
-Your code never leaves your GitHub Actions runner.
-
-## Links
-
-- [DeepSweep Documentation](https://docs.deepsweep.ai)
-- [CLI Installation](https://pypi.org/project/deepsweep-ai/)
-- [VS Code Extension](https://marketplace.visualstudio.com/items?itemName=deepsweep.deepsweep)
+That's the whole setup. No account, no API key, no install step.
 
 ---
 
-Ship with vibes. Ship secure.
+## What it checks
+
+Your agents' **capabilities** and **boundary gaps** — what an agent configuration permits
+versus what it needs: MCP servers and their tool descriptions, editor agent configs, shell
+and deploy reach, git write access, and where credentials sit relative to all of it.
+
+It reviews the *environment your agents run in*, not your application code. Existing SAST
+tools do not look at this, because it did not exist as an attack surface until agents did.
+
+## Usage
+
+```yaml
+name: Agent Environment Review
+on: [pull_request]
+
+permissions:
+  contents: read
+  pull-requests: write      # only needed for the PR comment
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: deepsweep-ai/action@v1
+        with:
+          fail-below-score: 70   # optional — fail the check below this posture
+```
+
+### Inputs
+
+| Input | Default | What it does |
+|---|---|---|
+| `path` | `.` | directory to review |
+| `fail-below-score` | *(none)* | fail the check when posture is below this number (0–100). Omit to report without blocking. |
+| `comment-on-pr` | `true` | post the result as a PR comment (updated in place, never appended) |
+| `api-key` | *(none)* | optional, for authenticated features |
+| `fail-on-grade` | *(none)* | **deprecated.** DeepSweep scores posture 0–100 and issues no letter grade. Setting it fails the run rather than passing a gate that cannot be evaluated. Use `fail-below-score`. |
+
+### Outputs
+
+| Output | Example |
+|---|---|
+| `score` | `77` — posture, 0–100. Empty when no agent configuration was found to review. |
+| `posture-band` | `good` — one of `weak`, `fair`, `good`, `strong` |
+| `attestation` | `claimed` — the identity tier the score was computed under |
+| `findings` | `3` |
+| `badge-markdown` | a README badge for your repo |
+| `grade` | *deprecated, always empty* |
+
+Posture is always reported with its attestation tier, never as a bare number: a score
+describes the protections observed in your agent-writable environment at review time. It
+is not a safety certification and not identity verification.
+
+### Gate a merge on it
+
+```yaml
+      - uses: deepsweep-ai/action@v1
+        with:
+          fail-below-score: 70
+```
+
+Below 70, the check fails. At or above it, the comment still posts.
+
+If no agent configuration is found to review, the check **fails rather than passes** — a
+gate that cannot be evaluated is never treated as a pass.
+
+---
+
+## How it runs — and what leaves your runner
+
+**Nothing.** The review executes entirely on the GitHub runner using an engine bundled
+inside this action. No source, no diff, no file contents, and no repository name are
+transmitted anywhere.
+
+There is no `pip install`, no `npm install -g`, and nothing placed on `PATH`. The action
+executes the **same engine binary the DeepSweep Governance Studio desktop app runs**, so a
+review means the same thing in CI as it does on a developer's machine.
+
+It **fails closed**: a malformed response, a protocol mismatch, or a missing engine fails the
+step. None of them can quietly become a passing review.
+
+## Also available
+
+- **Editor extension** — the same review inside VS Code, Cursor, Windsurf, Trae and
+  Antigravity: <https://open-vsx.org/extension/deepsweep-ai/deepsweep>
+- **Governance Studio** — the desktop app: <https://deepsweep.ai/download>
+
+## Licence & support
+
+Proprietary. Issues and questions: <https://deepsweep.ai>
