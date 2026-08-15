@@ -1,18 +1,17 @@
-name: 'DeepSweep AI Code Security'
-description: |
-  Validate your codebase for AI-generated code security risks, typosquatting, and supply chain threats.
-
-  Permissions required for PR comments:
-    pull-requests: write
-  Permissions required for commit status:
-    statuses: write
+# `name` and `description` ARE the Marketplace listing's title and subtitle.
+# The previous copy described a vulnerability scanner hunting typosquatting and
+# supply-chain threats. That is explicitly what DeepSweep is NOT, and it would
+# have been our headline on the largest developer audience we can reach.
+# Required permissions are documented in README.md, not crammed into a subtitle.
+name: 'DeepSweep Agent Environment Review'
+description: 'See what your AI coding agents can actually reach in your repo, and gate the pull request on it. Runs on your runner; no source leaves the machine.'
 branding:
   icon: 'shield'
   color: 'blue'
 
 inputs:
   path:
-    description: 'Path to scan (defaults to repository root)'
+    description: 'Path to review (defaults to repository root)'
     required: false
     default: '.'
   fail-below-score:
