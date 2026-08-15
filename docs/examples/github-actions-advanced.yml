@@ -15,7 +15,6 @@ jobs:
 
     permissions:
       contents: read
-      security-events: write  # Required for SARIF upload
       pull-requests: write    # Required for PR comments
 
     steps:
@@ -27,19 +26,19 @@ jobs:
         uses: deepsweep-ai/action@v1
         with:
           path: '.'
-          fail-on: 'high'
-          upload-sarif: 'true'
+          fail-below-score: 70
           comment-on-pr: 'true'
 
-      - name: Check critical findings
-        if: steps.deepsweep.outputs.critical-count > 0
+      - name: Report findings
+        if: steps.deepsweep.outputs.findings != '0'
         run: |
-          echo "[FAIL] Found ${{ steps.deepsweep.outputs.critical-count }} critical item(s)"
-          echo "Review the Security tab for details"
+          echo "[WARN] ${{ steps.deepsweep.outputs.findings }} finding(s) — see the PR comment"
 
       - name: Badge update
         if: github.ref == 'refs/heads/main'
         run: |
-          echo "Score: ${{ steps.deepsweep.outputs.score }}"
-          echo "Grade: ${{ steps.deepsweep.outputs.grade }}"
-          # Could update a badge service here
+          # Posture is always reported with its attestation tier, never as a bare
+          # number: it describes protections observed in the agent-writable
+          # environment, not a verified safety result.
+          echo "Posture: ${{ steps.deepsweep.outputs.score }}/100 (${{ steps.deepsweep.outputs.posture-band }}) — identity ${{ steps.deepsweep.outputs.attestation }}, not verified"
+          echo "${{ steps.deepsweep.outputs.badge-markdown }}"

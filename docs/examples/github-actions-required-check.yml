@@ -23,6 +23,5 @@ jobs:
 
       - uses: deepsweep-ai/action@v1
         with:
-          fail-on: 'high'
-          upload-sarif: 'true'
+          fail-below-score: 70
           comment-on-pr: 'true'
