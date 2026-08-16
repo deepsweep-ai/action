@@ -3,8 +3,14 @@
 # supply-chain threats. That is explicitly what DeepSweep is NOT, and it would
 # have been our headline on the largest developer audience we can reach.
 # Required permissions are documented in README.md, not crammed into a subtitle.
+#
+# HARD LIMIT: `description` must be UNDER 125 characters or GitHub refuses to
+# publish the release to the Marketplace — the release page shows
+# "Description must be less than 125 characters" and the publish checkbox
+# cannot be saved. The previous copy was 147 and blocked the listing on
+# 2026-08-16. Count before you commit.
 name: 'DeepSweep Agent Environment Review'
-description: 'See what your AI coding agents can actually reach in your repo, and gate the pull request on it. Runs on your runner; no source leaves the machine.'
+description: 'See what your AI coding agents can reach in this repo and gate the PR on it. Runs on your runner, nothing uploaded.'
 branding:
   icon: 'shield'
   color: 'blue'
