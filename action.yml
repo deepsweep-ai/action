@@ -9,8 +9,16 @@
 # "Description must be less than 125 characters" and the publish checkbox
 # cannot be saved. The previous copy was 147 and blocked the listing on
 # 2026-08-16. Count before you commit.
+#
+# WHAT THE 125 CHARACTERS ARE FOR (measured 2026-08-16, VSC-ADR-035):
+# GitHub Marketplace search indexes this DESCRIPTION, not just `name`. Three
+# listings rank on page 1 for terms absent from their names but present in
+# their descriptions — setup-aimock and agnix-ci for "mcp", atr-scan for
+# "ai security". Category rank is therefore winnable here WITHOUT renaming the
+# listing and without reopening positioning. Spend the budget on the words a
+# buyer actually types: ai, agent, security, mcp, review, ci, pr.
 name: 'DeepSweep Agent Environment Review'
-description: 'See what your AI coding agents can reach in this repo and gate the PR on it. Runs on your runner, nothing uploaded.'
+description: 'AI agent security review for CI: what your agents and MCP servers can reach, gated on each PR. Runs on your runner.'
 branding:
   icon: 'shield'
   color: 'blue'
