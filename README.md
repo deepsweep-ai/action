@@ -23,6 +23,72 @@ and deploy reach, git write access, and where credentials sit relative to all of
 It reviews the *environment your agents run in*, not your application code. Existing SAST
 tools do not look at this, because it did not exist as an attack surface until agents did.
 
+## Which editors and agents does it cover?
+
+Every file below is read on the runner and never leaves it. The list is the detector
+registry, not a roadmap — if a path is named here, this action reads it today.
+
+| Agent / editor | Configuration it reviews |
+|---|---|
+| **Cursor** | `.cursorrules`, `.cursor/rules` (one nested level), `.cursor/hooks.json`, `.cursor/mcp.json` |
+| **Antigravity** (Gemini) | `.agents/mcp_config.json`, `GEMINI.md`, `~/.gemini/config/mcp_config.json`, and the presence of `~/.gemini/antigravity/mcp_oauth_tokens.json` — flagged by directory listing, never opened |
+| **Trae** | `.trae/rules`, `.trae/mcp.json`, `~/.trae/mcp.json`, `~/.trae/user_rules` |
+| **Windsurf** (Codeium) | `.windsurfrules`, `.windsurf/rules`, `.windsurf/workflows`, `.windsurf/mcp_config.json`, `~/.codeium/windsurf/mcp_config.json` |
+| **Claude Code** | `.claude/settings.json`, `.claude/settings.local.json` — allow/deny lists, hooks-as-capabilities, `additionalDirectories` |
+| **GitHub Copilot** | `.github/copilot-instructions.md`, `.github/instructions/**`, `AGENTS.md`, `copilot-setup-steps` workflows, `github.copilot.chat.*` keys in `.vscode/settings.json` |
+| **VS Code / VSCodium / Kiro / code-server** | `.vscode/mcp.json`, `.vscode/settings.json` |
+| **Any MCP client** | `.mcp.json` and every server's command, args and tool descriptions |
+| **Dev containers** | `.devcontainer/devcontainer.json`, `.devcontainer.json` |
+| **The repository itself** | `.git` write reach, and `.env` / `.env.local` / `.env.production` — **key names only, never values** |
+
+Editors that read a shared standard are covered by that standard: anything speaking MCP is
+covered by the MCP row, and anything using `AGENTS.md` is covered by the Copilot row —
+including Zed, Amp and JetBrains AI Assistant when they write those files.
+
+### What a user-scope path means
+
+Four of the rows reach outside the repository, into the home directory — that is where
+Windsurf, Antigravity and Trae keep the MCP servers a developer has installed *globally*.
+Those servers are reachable from every repository on the machine, including this one, which
+is exactly why a repo-only review misses them. They are reported with their scope labelled
+`user`, so you can tell a project decision from a machine-wide one.
+
+The Antigravity OAuth token store is the one path deliberately never opened. Its **presence**
+is the finding; its contents are none of our business.
+
+---
+
+## Questions people actually ask
+
+**Does this send my code anywhere?**
+No. The review runs on your runner using an engine bundled in the action. No source, no
+diff, no file contents, no repository name is transmitted. There is nothing to opt out of.
+
+**Do I need an account or an API key?**
+No. `- uses: deepsweep-ai/action@v1` is the entire setup.
+
+**Is this a vulnerability scanner?**
+No, and it does not overlap with one. SAST reads your application code. This reads the
+*environment your agents run in* — what they are permitted to reach. Neither sees what the
+other sees.
+
+**What is a posture score?**
+A number out of 100 describing protections observed in your agent-writable environment at
+review time, always shown with its attestation tier. It is not a verified safety result and
+not identity verification, and it is never presented as one.
+
+**What happens if there is no agent configuration to review?**
+The check **fails**, rather than passing. A gate that cannot be evaluated is never treated
+as a pass.
+
+**Can I run it on a schedule instead of on pull requests?**
+Yes — it is an ordinary action. `on: schedule` works, as does `workflow_dispatch`.
+
+**Does it work on self-hosted runners?**
+Yes. It needs a filesystem and Node; it makes no outbound calls of its own.
+
+---
+
 ## Usage
 
 ```yaml
