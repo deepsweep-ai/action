@@ -23,7 +23,7 @@
  */
 import { parseTolerantJson, probeRead } from "../read.js";
 import { emptyResult } from "./detector.js";
-import { asRecord, asString, malformedWarning, unreadableWarning } from "./util.js";
+import { asRecord, asString, isBlankDocument, malformedWarning, unreadableWarning } from "./util.js";
 const CLAUDE_SETTINGS_PATHS = [".claude/settings.json", ".claude/settings.local.json"];
 /** Capability kind a deny rule constrains, or undefined (skip — see header). */
 function denyRuleConstrains(rule) {
@@ -58,7 +58,10 @@ function detect(workspaceRoot) {
         out.reviewedSources.push(rel);
         const json = asRecord(parseTolerantJson(probe.text));
         if (json === undefined) {
-            out.warnings.push(malformedWarning(rel));
+            // An empty file is nothing configured, not malformed — the guard
+            // nests here so the else-branch keeps its type narrowing.
+            if (!isBlankDocument(probe.text))
+                out.warnings.push(malformedWarning(rel));
             continue;
         }
         const permissions = asRecord(json["permissions"]);

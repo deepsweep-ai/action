@@ -6,7 +6,7 @@
  */
 import { parseTolerantJson, probeRead } from "../read.js";
 import { emptyResult } from "./detector.js";
-import { asRecord, asString, malformedWarning, unreadableWarning } from "./util.js";
+import { asRecord, asString, isBlankDocument, malformedWarning, unreadableWarning } from "./util.js";
 const DEVCONTAINER_PATHS = [".devcontainer/devcontainer.json", ".devcontainer.json"];
 /** Docker feature ids that grant daemon-level (privileged-equivalent) control. */
 const PRIVILEGED_FEATURE_MARKERS = [
@@ -112,7 +112,10 @@ function detect(workspaceRoot) {
         out.reviewedSources.push(rel);
         const json = asRecord(parseTolerantJson(probe.text));
         if (json === undefined) {
-            out.warnings.push(malformedWarning(rel));
+            // An empty file is nothing configured, not malformed — the guard
+            // nests here so the else-branch keeps its type narrowing.
+            if (!isBlankDocument(probe.text))
+                out.warnings.push(malformedWarning(rel));
             continue;
         }
         reviewOne(rel, json, out);
