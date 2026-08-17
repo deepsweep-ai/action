@@ -55,3 +55,32 @@ under `src/deepsweep/reporters/` is ever wanted as a reference.
 
 The engine bundled here is plumbing: never on `PATH`, never symlinked, never a
 command a human is told to type. That is what keeps it on the right side of the line.
+
+## Before every release: is the engine still current?
+
+```bash
+./scripts/check-engine-freshness.sh                    # against GitHub
+./scripts/check-engine-freshness.sh ../deepsweep-team  # against a local clone
+```
+
+Exit **0** current · **1** stale or unstamped · **2** could not check. A check
+that could not run is **not** a pass — an unanswered question never counts as a
+green one.
+
+**Why this exists.** `engine/` is committed because GitHub runs this action from
+the tag with no build step, so the bundle *is* the product — and it can fall
+behind its source with nothing to say so. The action still runs, still reports,
+and simply cannot see what the newer engine can.
+
+Measured 2026-08-17: the engine was vendored on **08-15**, the Antigravity and
+Trae detectors landed **08-16**, and for two days — **across the Marketplace
+launch** — every CI user ran a review that could not open
+`.agents/mcp_config.json` or `.trae/mcp.json` at all. A review that completes,
+reports nothing, and reads as safe. Nothing anywhere could have told anyone.
+
+`vendor-engine.sh` now writes `engine/PROVENANCE.json` recording the source
+commit, its date, and the vendoring time. Do not hand-edit it: a stamp you can
+edit is a stamp that lies.
+
+**And move the `v1` tag after merging.** A fix on `main` does not fix a
+tag-resolved action — consumers pin `@v1`, and the tag is what they get.
