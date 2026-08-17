@@ -1,6 +1,6 @@
 import { parseTolerantJson, probeRead } from "../read.js";
 import { emptyResult } from "./detector.js";
-import { malformedWarning, mcpServersFrom, unreadableWarning } from "./util.js";
+import { isBlankDocument, malformedWarning, mcpCredentialDetail, mcpServersFrom, unreadableWarning, } from "./util.js";
 const MCP_CONFIG_PATHS = [".mcp.json", ".cursor/mcp.json", ".vscode/mcp.json"];
 function detect(workspaceRoot) {
     const out = emptyResult();
@@ -17,17 +17,16 @@ function detect(workspaceRoot) {
         out.reviewedSources.push(rel);
         const json = parseTolerantJson(probe.text);
         if (json === undefined) {
-            out.warnings.push(malformedWarning(rel));
+            // An empty file is nothing configured, not malformed — the guard
+            // nests here so the else-branch keeps its type narrowing.
+            if (!isBlankDocument(probe.text))
+                out.warnings.push(malformedWarning(rel));
             continue;
         }
         for (const server of mcpServersFrom(json)) {
             const transport = server.url ? "remote" : "local";
-            // ADR-013 flattening: detail is a flat primitive record, so the FIRST
-            // hit carries the exact {credentialPattern, argIndex} shape, the count
-            // covers the rest, and multi-hit servers add a compact "pattern@index"
-            // list. Pattern names + indexes only — never an arg's content.
-            const hits = server.credentialHits ?? [];
-            const first = hits[0];
+            // The ADR-013 fragment comes from ONE owner so no family can silently
+            // omit it — three of six once did (TEAM-ADR-035).
             const cap = {
                 kind: "mcpToolAccess",
                 summary: `MCP server "${server.name}" (${transport}) is available to agents`,
@@ -37,20 +36,7 @@ function detect(workspaceRoot) {
                     transport,
                     ...(server.command ? { command: server.command } : {}),
                     ...(server.url ? { url: server.url } : {}),
-                    ...(server.argCount !== undefined ? { argCount: server.argCount } : {}),
-                    ...(first !== undefined
-                        ? {
-                            credentialPattern: first.credentialPattern,
-                            argIndex: first.argIndex,
-                            credentialPatternCount: hits.length,
-                        }
-                        : {}),
-                    ...(hits.length > 1
-                        ? { credentialPatterns: hits.map((h) => `${h.credentialPattern}@${h.argIndex}`).join(",") }
-                        : {}),
-                    ...(server.cleartextHttp !== undefined
-                        ? { cleartextHttp: true, cleartextDeclaredIn: server.cleartextHttp }
-                        : {}),
+                    ...mcpCredentialDetail(server),
                 },
             };
             out.capabilities.push(cap);

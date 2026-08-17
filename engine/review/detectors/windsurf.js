@@ -14,7 +14,7 @@
  */
 import { exists, parseTolerantJson, probeRead, probeReadUser } from "../read.js";
 import { emptyResult } from "./detector.js";
-import { dirNamesOrWarn, malformedWarning, mcpServersFrom, nameList, unreadableWarning, visibleNames, } from "./util.js";
+import { dirNamesOrWarn, isBlankDocument, malformedWarning, mcpCredentialDetail, mcpServersFrom, nameList, unreadableWarning, visibleNames, } from "./util.js";
 import { countNoun } from "../text.js";
 const RULES_FILE = ".windsurfrules";
 const RULES_DIR = ".windsurf/rules";
@@ -66,7 +66,10 @@ function detect(workspaceRoot, ctx) {
         out.reviewedSources.push(MCP_CONFIG);
         const json = parseTolerantJson(mcpProbe.text);
         if (json === undefined) {
-            out.warnings.push(malformedWarning(MCP_CONFIG));
+            // An empty file is nothing configured, not malformed — the guard
+            // nests here so the else-branch keeps its type narrowing.
+            if (!isBlankDocument(mcpProbe.text))
+                out.warnings.push(malformedWarning(MCP_CONFIG));
         }
         else {
             for (const server of mcpServersFrom(json)) {
@@ -80,6 +83,7 @@ function detect(workspaceRoot, ctx) {
                         transport,
                         ...(server.command ? { command: server.command } : {}),
                         ...(server.url ? { url: server.url } : {}),
+                        ...mcpCredentialDetail(server),
                     },
                 });
                 if (server.command) {
@@ -107,13 +111,14 @@ function detect(workspaceRoot, ctx) {
         out.reviewedSources.push(GLOBAL_MCP_CONFIG_LABEL);
         const json = parseTolerantJson(globalProbe.text);
         if (json === undefined) {
-            out.warnings.push(malformedWarning(GLOBAL_MCP_CONFIG_LABEL));
+            // An empty file is nothing configured, not malformed — the guard
+            // nests here so the else-branch keeps its type narrowing.
+            if (!isBlankDocument(globalProbe.text))
+                out.warnings.push(malformedWarning(GLOBAL_MCP_CONFIG_LABEL));
         }
         else {
             for (const server of mcpServersFrom(json)) {
                 const transport = server.url ? "remote" : "local";
-                const hits = server.credentialHits ?? [];
-                const first = hits[0];
                 out.capabilities.push({
                     kind: "mcpToolAccess",
                     summary: `MCP server "${server.name}" (${transport}, user-scope config) is available to agents in EVERY workspace`,
@@ -124,20 +129,7 @@ function detect(workspaceRoot, ctx) {
                         scope: "user",
                         ...(server.command ? { command: server.command } : {}),
                         ...(server.url ? { url: server.url } : {}),
-                        ...(server.argCount !== undefined ? { argCount: server.argCount } : {}),
-                        ...(first !== undefined
-                            ? {
-                                credentialPattern: first.credentialPattern,
-                                argIndex: first.argIndex,
-                                credentialPatternCount: hits.length,
-                            }
-                            : {}),
-                        ...(hits.length > 1
-                            ? { credentialPatterns: hits.map((h) => `${h.credentialPattern}@${h.argIndex}`).join(",") }
-                            : {}),
-                        ...(server.cleartextHttp !== undefined
-                            ? { cleartextHttp: true, cleartextDeclaredIn: server.cleartextHttp }
-                            : {}),
+                        ...mcpCredentialDetail(server),
                     },
                 });
                 if (server.command) {

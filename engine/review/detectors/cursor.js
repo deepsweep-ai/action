@@ -8,7 +8,7 @@
  */
 import { exists, parseTolerantJson, probeRead } from "../read.js";
 import { emptyResult } from "./detector.js";
-import { asRecord, asString, dirNamesOrWarn, malformedWarning, nameList, unreadableWarning, visibleNames, } from "./util.js";
+import { asRecord, asString, dirNamesOrWarn, isBlankDocument, malformedWarning, nameList, unreadableWarning, visibleNames, } from "./util.js";
 import { countNoun } from "../text.js";
 const RULES_FILE = ".cursorrules";
 const RULES_DIR = ".cursor/rules";
@@ -53,7 +53,10 @@ function detect(workspaceRoot) {
         const json = asRecord(parseTolerantJson(hooksProbe.text));
         const hooks = asRecord(json?.["hooks"]);
         if (json === undefined || hooks === undefined) {
-            out.warnings.push(malformedWarning(HOOKS_FILE));
+            // An empty file is nothing configured, not malformed — the guard
+            // nests here so the else-branch keeps its type narrowing.
+            if (!isBlankDocument(hooksProbe.text))
+                out.warnings.push(malformedWarning(HOOKS_FILE));
         }
         else {
             for (const event of Object.keys(hooks).sort()) {
