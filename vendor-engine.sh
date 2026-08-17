@@ -51,6 +51,33 @@ if ! node "$DEST/engine-host.js" --help >/dev/null 2>&1; then
   exit 1
 fi
 
+# PROVENANCE. Without this, nothing records WHEN the engine was vendored or
+# from WHAT — and that is not hypothetical: the engine sat two days behind its
+# source across a Marketplace launch, shipping a review blind to Antigravity
+# and Trae, and nothing anywhere could have told anyone.
+#
+# The source commit is read from the source tree's git repo when there is one.
+# A build directory without git history still stamps — with "unknown" — because
+# a stamp that only appears in the happy path is not a stamp.
+SRC_SHA="unknown"
+SRC_DATE="unknown"
+if SRC_REPO=$(cd "$SOURCE" && git rev-parse --show-toplevel 2>/dev/null); then
+  SRC_SHA=$(cd "$SRC_REPO" && git rev-parse HEAD 2>/dev/null || echo unknown)
+  SRC_DATE=$(cd "$SRC_REPO" && git log -1 --format=%cI 2>/dev/null || echo unknown)
+fi
+
 FILES=$(find "$DEST" -type f | wc -l | tr -d ' ')
-echo "[PASS] engine vendored into action/engine ($FILES files)"
+
+cat > "$DEST/PROVENANCE.json" <<PROV
+{
+  "_note": "Written by vendor-engine.sh. Compare against the engine source with scripts/check-engine-freshness.sh. Never edit by hand: a stamp you can edit is a stamp that lies.",
+  "sourceCommit": "$SRC_SHA",
+  "sourceCommittedAt": "$SRC_DATE",
+  "vendoredAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "fileCount": $((FILES + 1))
+}
+PROV
+
+echo "[PASS] engine vendored into action/engine ($((FILES + 1)) files)"
 echo "       source: $SOURCE"
+echo "       source commit: $SRC_SHA"
