@@ -58,7 +58,13 @@ jobs:
 | `fail-on` | `high` | Minimum severity to fail |
 | `upload-sarif` | `true` | Upload to Security tab |
 | `comment-on-pr` | `true` | Post PR comment |
+| `include-mcp` | `true` | Include MCP server configuration checks |
 | `version` | `latest` | CLI version |
+| `api-key` | `''` | DeepSweep API key for paid plans (use a secret) |
+| `telemetry` | `false` | Send anonymous DeepSweep telemetry from CI |
+| `github-token` | `github.token` | Token used to post the PR comment |
+
+Results are also written to the job summary and as inline annotations, so they show up on fork PRs where the token can't comment or upload SARIF.
 
 ## Outputs
 

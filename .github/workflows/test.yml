@@ -1,0 +1,73 @@
+name: Test Action
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pytest && python -m pytest -q tests
+
+  unsafe-fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./
+        id: ds
+        with:
+          path: tests/fixtures/unsafe
+          fail-on: 'none'
+          upload-sarif: 'false'
+          comment-on-pr: 'false'
+
+      - name: Assert findings were reported
+        env:
+          SCORE: ${{ steps.ds.outputs.score }}
+          FINDINGS: ${{ steps.ds.outputs.findings-count }}
+          CRITICAL: ${{ steps.ds.outputs.critical-count }}
+        run: |
+          echo "score=$SCORE findings=$FINDINGS critical=$CRITICAL"
+          [ "$FINDINGS" -ge 1 ] && [ "$CRITICAL" -ge 1 ] && [ "$SCORE" -lt 100 ]
+
+  threshold-fails:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./
+        id: ds
+        continue-on-error: true
+        with:
+          path: tests/fixtures/unsafe
+          fail-on: 'critical'
+          upload-sarif: 'false'
+          comment-on-pr: 'false'
+
+      - name: Assert the check failed
+        run: '[ "${{ steps.ds.outcome }}" = "failure" ]'
+
+  safe-fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./
+        id: ds
+        with:
+          path: tests/fixtures/safe
+          upload-sarif: 'false'
+          comment-on-pr: 'false'
+
+      - name: Assert a clean pass
+        run: '[ "${{ steps.ds.outputs.findings-count }}" = "0" ] && [ "${{ steps.ds.outputs.grade }}" = "A" ]'

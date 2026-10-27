@@ -34,7 +34,11 @@ jobs:
 | `fail-on` | `high` | Minimum severity to fail |
 | `upload-sarif` | `true` | Upload to Security tab |
 | `comment-on-pr` | `true` | Post PR comment |
+| `include-mcp` | `true` | Include MCP server configuration checks |
 | `version` | `latest` | CLI version |
+| `api-key` | `''` | DeepSweep API key for paid plans (use a secret) |
+| `telemetry` | `false` | Send anonymous DeepSweep telemetry from CI |
+| `github-token` | `github.token` | Token used to post the PR comment |
 
 ## Outputs
 
@@ -183,11 +187,11 @@ Pin to a specific version:
 ```yaml
 - uses: deepsweep-ai/action@v1
   with:
-    version: '1.2.0'
+    version: '1.0.2'
 ```
 
 ## Security
 
 - Your code never leaves the GitHub Actions runner
 - SARIF results are uploaded to GitHub's Security tab
-- No external services are contacted during validation
+- No external services are contacted during validation unless you set `telemetry: 'true'`
