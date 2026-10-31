@@ -89,6 +89,22 @@ test("the review step runs under bash and writes its outputs", () => {
   assert.match(r.summary, /DeepSweep Agent Environment Review/);
 });
 
+test("the summary names each boundary gap and how to address it", () => {
+  const r = runReviewStep(fs.readFileSync(path.join(ROOT, "action.yml"), "utf8"));
+  assert.equal(r.status, 0, `review step exited ${r.status}:\n${r.stderr}`);
+  assert.match(r.summary, /### Boundary gaps/);
+  assert.match(r.summary, /\| Severity \| Gap \| How to address \|/);
+  assert.match(r.summary, /\| CRITICAL \| Broad pre-approved permission patterns/);
+  const gaps = fs.readFileSync("/tmp/deepsweep-gaps.md", "utf8");
+  assert.doesNotMatch(gaps, /server-filesystem|Bash\(\*\)/, "repository content must not be rendered");
+});
+
+test("the step's embedded python parses on Python 3.8+ (no quotes nested in f-strings)", () => {
+  const script = stepScript(fs.readFileSync(path.join(ROOT, "action.yml"), "utf8"), "Run the review");
+  const nested = script.split("\n").filter((l) => /f"[^"]*\{[^}]*"/.test(l));
+  assert.deepEqual(nested, [], "nested quotes inside an f-string need Python 3.12");
+});
+
 test("the step's embedded python never uses '' inside the single-quoted program", () => {
   const script = stepScript(fs.readFileSync(path.join(ROOT, "action.yml"), "utf8"), "Run the review");
   assert.doesNotMatch(script, /else ''/);
