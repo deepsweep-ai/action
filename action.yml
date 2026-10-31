@@ -192,13 +192,34 @@ runs:
         caps = totals.get("capabilities", 0)
         gaps = totals.get("boundaryGaps", 0)
         findings = len(res.get("findings") or []) or totals.get("critical", 0) + totals.get("high", 0)
-        print(f"GRADE={grade if grade is not None else ""}")
-        print(f"SCORE={score if score is not None else ""}")
+        # No quotes nested inside f-strings: that needs Python 3.12, and
+        # ubuntu-22.04, older macOS and many self-hosted runners ship less.
+        grade_text = "" if grade is None else grade
+        score_text = "" if score is None else score
+        print(f"GRADE={grade_text}")
+        print(f"SCORE={score_text}")
         print(f"BAND={band}")
         print(f"ATTESTATION={attestation}")
         print(f"FINDINGS={findings}")
         print(f"CAPABILITIES={caps}")
         print(f"GAPS={gaps}")
+        # The PR comment and summary name each gap and how to address it.
+        # Only engine-authored fields are rendered: capability summaries can
+        # echo repository content (a hook command, a server name) and stay out.
+        order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        def cell(text):
+            return " ".join(str(text or "").replace("|", "\\|").split())
+        rows = sorted(rep.get("boundaryGaps") or [], key=lambda g: order.get(str(g.get("severity")).lower(), 9))
+        with open("/tmp/deepsweep-gaps.md", "w", encoding="utf-8") as fh:
+            if rows:
+                fh.write("| Severity | Gap | How to address |\n|---|---|---|\n")
+            for g in rows[:10]:
+                sev = cell(g.get("severity")).upper()
+                gap = cell(g.get("summary"))
+                fix = cell(g.get("recommendation"))
+                fh.write(f"| {sev} | {gap} | {fix} |\n")
+            if len(rows) > 10:
+                fh.write(f"\n...and {len(rows) - 10} more in the job summary.\n")
         ')"
 
         echo "grade=$GRADE" >> "$GITHUB_OUTPUT"
@@ -235,6 +256,12 @@ runs:
           echo "| **Boundary gaps** | $GAPS |"
           echo "| **Findings** | $FINDINGS |"
           echo
+          if [ -s /tmp/deepsweep-gaps.md ]; then
+            echo "### Boundary gaps"
+            echo
+            cat /tmp/deepsweep-gaps.md
+            echo
+          fi
           echo "*Reviewed locally on this runner — no source left the machine.*"
         } >> "$GITHUB_STEP_SUMMARY"
 
@@ -342,6 +369,10 @@ runs:
             rows.push('| **Posture** | not scored — no agent configuration found |');
           }
           rows.push(`| **Findings** | ${DS_FINDINGS} |`);
+          // Written by the review step; a number with no names gives a
+          // reviewer nothing to act on.
+          let gaps = '';
+          try { gaps = require('fs').readFileSync('/tmp/deepsweep-gaps.md', 'utf8').trim(); } catch {}
           const body = [
             '### DeepSweep — Agent Environment Review',
             '',
@@ -349,6 +380,7 @@ runs:
             '|---|---|',
             ...rows,
             '',
+            ...(gaps ? ['**Boundary gaps**', '', gaps, ''] : []),
             'What your AI coding agents can reach in this repository, and where the gaps are.',
             'Reviewed on this runner — no source left the machine.',
             '',
